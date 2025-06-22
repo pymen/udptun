@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/python
 #coding: utf8
 '''
     UDP Tunnel VPN
@@ -19,10 +19,10 @@ import traceback
 import signal
 import ctypes
 import binascii
-import pickle as pickle
+import cPickle as pickle
 import re
 
-SHARED_PASSWORD = hashlib.sha1(b"feiwu").digest() # hashlib input must be bytes
+SHARED_PASSWORD = hashlib.sha1("feiwu").digest()
 TUNSETIFF = 0x400454ca
 IFF_TUN   = 0x0001 | 0x1000 #TUN + NO_PI
 
@@ -46,14 +46,13 @@ class Server():
             tun_fd = os.open("/dev/tun", os.O_RDWR)
         if tun_fd < 0:
             raise Exception('Failed to create tun device')
-        # struct.pack needs bytes for string format, tname will be bytes
-        ifs = fcntl.ioctl(tun_fd, TUNSETIFF, struct.pack("16sH", b"tun%d", IFF_TUN))
-        tname = ifs[:16].strip(b"\x00").decode('ascii') # Decode to string for use in print/os.system
+        ifs = fcntl.ioctl(tun_fd, TUNSETIFF, struct.pack("16sH", "tun%d", IFF_TUN))
+        tname = ifs[:16].strip("\x00")
         return {'tun_fd': tun_fd, 'tun_name': tname}
-    
+
     def config_tun(self, c):
         """Set up IP address and P2P address"""
-        print("Configuring interface %s with ip %s" % (c['tun_name'], c['tun_ip']))
+        print "Configuring interface %s with ip %s" % (c['tun_name'], c['tun_ip'])
         os.system("ifconfig %s %s dstaddr %s mtu %s up" % (c['tun_name'], c['tun_ip'], c['tun_peer'], MTU))
 
     def get_client_by_addr(self, addr):
@@ -73,24 +72,20 @@ class Server():
             if c['tun_peer'] == ip:
                 return c
         return None
-        
+
     def do_login(self, data, addr):
         """Deal with client logins, use share key."""
-        # data from socket is bytes, 'AUTH' needs to be bytes for startswith
-        if data.startswith(b'AUTH'):
-            # pickle.loads needs bytes, data[4:] is already bytes
-            # Set encoding to 'bytes' for pickled byte strings, or 'latin1' for older pickles
-            d = pickle.loads(data[4:], encoding='bytes')
+        if data.startswith('AUTH'):
+            d = pickle.loads(data[4:])
             # Check password
             if d['password'] != SHARED_PASSWORD:
-                d_resp = { # Use a different variable name to avoid confusion
+                d = {
                     'ret': 1,
                     'msg': 'Incorrent password.'
                 }
-                # pickle.dumps produces bytes, 'AUTH' needs to be bytes
-                self.udpfd.sendto(b'AUTH' + pickle.dumps(d_resp), addr)
+                self.udpfd.sendto('AUTH' + pickle.dumps(d), addr)
                 return
-            # Find existing session 
+            # Find existing session
             found = False
             for c in self.sessions:
                 if c['tun_peer'] == d['tun_ip'] and c['tun_ip'] == d['tun_peer']:
@@ -109,16 +104,16 @@ class Server():
                 c.update(t)
                 self.config_tun(c)
                 self.sessions.append(c)
-                print('[%s] Created new tun %s, %s -> %s for %s' % (time.ctime(), c['tun_name'], c['tun_ip'], c['tun_peer'], c['addr']))
+                print '[%s] Created new tun %s, %s -> %s for %s' % (time.ctime(), c['tun_name'], c['tun_ip'], c['tun_peer'], c['addr'])
             else:
-                print('[%s] Keep alive tun %s, %s -> %s for %s' % (time.ctime(), c['tun_name'], c['tun_ip'], c['tun_peer'], c['addr']))
-            d_resp = { # Use a different variable name
+                print '[%s] Keep alive tun %s, %s -> %s for %s' % (time.ctime(), c['tun_name'], c['tun_ip'], c['tun_peer'], c['addr'])
+            d = {
                 'ret': 0,
             }
-            self.udpfd.sendto(b'AUTH'+ pickle.dumps(d_resp), addr)
-            print('send ok to', addr)
+            self.udpfd.sendto('AUTH'+ pickle.dumps(d), addr)
+            print 'send ok to', addr
         else:
-            self.udpfd.sendto(b'AUTH', addr) # 'AUTH' needs to be bytes
+            self.udpfd.sendto('AUTH', addr)
 
     def sync_routes(self):
         """ Send dynamic routing table to every client for P2P package excahnge.
@@ -133,8 +128,7 @@ class Server():
             c = self.get_client_by_intip(gw)
             r = {'network': ip, 'mask': int(mask), 'gw': gw, 'addr': c['addr'], 'active_time': int(c['active_time'])}
             table.append(r)
-        # 'RTBL' needs to be bytes, pickle.dumps returns bytes
-        data = b'RTBL' + pickle.dumps(table)
+        data = 'RTBL' + pickle.dumps(table)
         for c in self.sessions:
             try:
                 self.udpfd.sendto(data, c['addr'])
@@ -148,7 +142,7 @@ class Server():
         self.sessions = []
         self.rt_sync_time = 0
 
-        print('Server listen at port', PORT)
+        print 'Server listen at port', PORT
         while True:
             now = int(time.time())
             fds = [x['tun_fd'] for x in self.sessions]
@@ -157,17 +151,16 @@ class Server():
             for r in rset:
                 if r == self.udpfd:
                     if DEBUG: os.write(1, "<")
-                    data, addr = self.udpfd.recvfrom(BUFFER_SIZE) # data is bytes
+                    data, addr = self.udpfd.recvfrom(BUFFER_SIZE)
                     c = self.get_client_by_addr(addr)
-                    # 'AUTH' needs to be bytes for startswith
-                    if data.startswith(b'AUTH') or not c:
+                    if data.startswith('AUTH') or not c:
                         self.do_login(data, addr)
                     else:
                         c['active_time'] = now
-                        os.write(c['tun_fd'], data) # os.write expects bytes
+                        os.write(c['tun_fd'], data)
                 else:
                     c = self.get_client_by_tun(r)
-                    if DEBUG: os.write(1, b">") # os.write to stdout needs bytes
+                    if DEBUG: os.write(1, ">")
                     data = os.read(r, BUFFER_SIZE)
                     try:
                         self.udpfd.sendto(data, c['addr'])
@@ -180,7 +173,7 @@ class Client():
     def create_tun(self):
         """ Every client needs a tun interface """
         if sys.platform == 'darwin':
-            for i in range(10):
+            for i in xrange(10):
                 try:
                     tname = 'tun%s' % i
                     tun_fd = os.open('/dev/%s' % tname, os.O_RDWR)
@@ -192,38 +185,33 @@ class Client():
                 tun_fd = os.open("/dev/net/tun", os.O_RDWR)
             except:
                 tun_fd = os.open("/dev/tun", os.O_RDWR)
-            # struct.pack needs bytes for string format, tname will be bytes
-            ifs = fcntl.ioctl(tun_fd, TUNSETIFF, struct.pack("16sH", b"t%d", IFF_TUN))
-            tname = ifs[:16].strip(b"\x00").decode('ascii') # Decode to string
+            ifs = fcntl.ioctl(tun_fd, TUNSETIFF, struct.pack("16sH", "t%d", IFF_TUN))
+            tname = ifs[:16].strip("\x00")
 
         return {'tun_fd': tun_fd, 'tun_name': tname}
-    
+
     def config_tun(self, c):
         """ Set up local ip and peer ip """
-        print("Configuring interface %s with ip %s" % (c['tun_name'], c['tun_ip']))
+        print "Configuring interface %s with ip %s" % (c['tun_name'], c['tun_ip'])
         os.system("ifconfig %s %s/32 %s mtu %s up" % (c['tun_name'], c['tun_ip'], c['tun_peer'], MTU))
 
     def do_login(self, data):
         """ Check login results """
-        # data from socket is bytes, data[4:] is bytes
         try:
-            # Use encoding='bytes' or 'latin1' for pickled byte strings
-            d = pickle.loads(data[4:], encoding='bytes')
+            d = pickle.loads(data[4:])
         except:
             d = {'ret': 1}
         if d['ret'] == 0:
             self.logged = True
-            print("Logged in server succefully!")
+            print "Logged in server succefully!"
         else:
             self.logged = False
-            print("Logged failed:", d.get('msg'))
+            print "Logged failed:", d.get('msg')
 
     def update_routes(self, data):
         """ Update routing table (peer list) for P2P packet exchange """
-        # data from socket is bytes, data[4:] is bytes
         try:
-            # Use encoding='bytes' or 'latin1' for pickled byte strings
-            table = pickle.loads(data[4:], encoding='bytes')
+            table = pickle.loads(data[4:])
         except:
             traceback.print_exc()
             return
@@ -240,9 +228,9 @@ class Client():
         for n, m, addr in self.rt_table:
             if dst & m == n:
                 return addr
-        print('No route address for', dst)
+        print 'No route address for', dst
         return self.addr
- 
+
     def run(self):
         """ Client network loop """
         global PORT
@@ -258,7 +246,7 @@ class Client():
         self.active_time = 0
         self.addr = (IP, PORT)
         self.rt_table = [(0, 0, (IP, PORT))]
-        print('[%s] Created client %s, %s -> %s for %s' % (time.ctime(), c['tun_name'], c['tun_ip'], c['tun_peer'], self.addr))
+        print '[%s] Created client %s, %s -> %s for %s' % (time.ctime(), c['tun_name'], c['tun_ip'], c['tun_peer'], self.addr)
 
         while True:
             now = time.time()
@@ -271,34 +259,32 @@ class Client():
                     'tun_ip': IFACE_IP,
                     'tun_peer': IFACE_PEER,
                 }
-                # pickle.dumps produces bytes, 'AUTH' needs to be bytes
-                auth_data = pickle.dumps(d)
-                self.udpfd.sendto(b'AUTH' + auth_data, self.addr)
+                data = pickle.dumps(d)
+                self.udpfd.sendto('AUTH' + data, self.addr)
                 self.log_time = now
-                print("[%s] Do login ..." % (time.ctime(), ))
+                print "[%s] Do login ..." % (time.ctime(), )
 
             rset = select.select([self.udpfd, self.tunfd], [], [], 1)[0]
             for r in rset:
                 if r == self.tunfd:
-                    if DEBUG: os.write(1, b">") # os.write to stdout needs bytes
-                    data = os.read(self.tunfd, BUFFER_SIZE) # data is bytes
-                    dst = struct.unpack('!I', data[20:24])[0] # data[20:24] is bytes
+                    if DEBUG: os.write(1, ">")
+                    data = os.read(self.tunfd, BUFFER_SIZE)
+                    dst = struct.unpack('!I', data[20:24])[0]
                     addr = self.get_router_by_dst(dst)
-                    self.udpfd.sendto(data, addr) # data is bytes
+                    self.udpfd.sendto(data, addr)
                 elif r == self.udpfd:
-                    if DEBUG: os.write(1, b"<") # os.write to stdout needs bytes
-                    data, src = self.udpfd.recvfrom(BUFFER_SIZE) # data is bytes
-                    # 'AUTH' and 'RTBL' need to be bytes for startswith
-                    if data.startswith(b"AUTH"):
+                    if DEBUG: os.write(1, "<")
+                    data, src = self.udpfd.recvfrom(BUFFER_SIZE)
+                    if data.startswith("AUTH"):
                         self.do_login(data)
-                    elif data.startswith(b'RTBL'):
+                    elif data.startswith('RTBL'):
                         self.update_routes(data)
                     else:
-                        os.write(self.tunfd, data) # data is bytes
+                        os.write(self.tunfd, data)
                         self.active_time = now
 
 def usage(status = 0):
-    print("Usage: %s [-s port|-c serverip] [-hd] [-l localip]" % (sys.argv[0]))
+    print "Usage: %s [-s port|-c serverip] [-hd] [-l localip]" % (sys.argv[0])
     sys.exit(status)
 
 def on_exit(no, info):
@@ -323,10 +309,10 @@ if __name__=="__main__":
             IFACE_IP = optarg
         elif opt == "-p":
             IFACE_PEER = optarg
-    
+
     if MODE == 0 or PORT == 0:
         usage(1)
-    
+
     signal.signal(signal.SIGTERM, on_exit)
     if MODE == 1:
         tun = Server()
@@ -337,9 +323,7 @@ if __name__=="__main__":
     except KeyboardInterrupt:
         pass
     except:
-        print(traceback.format_exc())
+        print traceback.format_exc()
     finally:
         # Cleanup something.
         pass
-
-
